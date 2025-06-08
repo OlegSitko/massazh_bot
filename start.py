@@ -2,19 +2,13 @@ import re
 from telegram import (
     Update,
     ReplyKeyboardMarkup,
-    ReplyKeyboardRemove,
     KeyboardButton
 )
 from telegram.ext import (
-    ApplicationBuilder,
-    CommandHandler,
-    MessageHandler,
     ContextTypes,
-    ConversationHandler,
-    filters
+    ConversationHandler
 )
 from config import ADMIN_ID
-from config import BOT_TOKEN
 from menu import menu
 
 NAME, PHONE, TIME = range(3)
@@ -22,23 +16,46 @@ NAME, PHONE, TIME = range(3)
 # Начало записи
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     context.user_data["state"] = NAME
-    keyboard = [[KeyboardButton("Отменить")]]
+    keyboard = [[KeyboardButton("◀️ Назад")]]
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     await update.message.reply_text("Введите ваше имя:", reply_markup=reply_markup)
     return NAME
 
-# Отменить — полная отмена и возврат в меню
-async def go_back(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    return await cancel(update, context)
+# Назад — шаг назад
+async def step_back(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    current = context.user_data.get("state")
 
-# Полная отмена
+    if current == PHONE:
+        context.user_data["state"] = NAME
+        await update.message.reply_text("Введите ваше имя:")
+        return NAME
+
+    elif current == TIME:
+        context.user_data["state"] = PHONE
+        await update.message.reply_text("Введите номер телефона:")
+        return PHONE
+
+    elif current == NAME:
+        # если на первом шаге — выйти в меню
+        await update.message.reply_text("Вы вернулись в меню.")
+        await menu(update, context)
+        return ConversationHandler.END
+
+    else:
+        await update.message.reply_text("Нечего отменять.")
+        return ConversationHandler.END
+
+# Отмена и возврат в меню
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    context.user_data.clear()
     keyboard = [
         [KeyboardButton("Записаться на массаж")],
-        [KeyboardButton("Мои Записи")]
+        [KeyboardButton("Мои Записи")],
+        [KeyboardButton("Отменить запись")],
+        [KeyboardButton("📆 🗓 Выбрать дату")]
     ]
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
-    await update.message.reply_text("Запись отменена. Вы можете начать заново:", reply_markup=reply_markup)
+    await update.message.reply_text("Запись отменена. Вы вернулись в меню:", reply_markup=reply_markup)
     return ConversationHandler.END
 
 # На главную

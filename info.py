@@ -13,6 +13,7 @@ from telegram.ext import (
     ConversationHandler,
     filters
 )
+from kalendar import inline_calendar_view
 from config import ADMIN_ID
 from records import save_records
 
@@ -33,16 +34,13 @@ async def get_phone(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         return PHONE
 
     context.user_data['phone'] = phone
-    keyboard = [
-        ["Сегодня в 16:00", "Сегодня в 18:00"],
-        ["Завтра в 12:00", "Завтра в 15:00"],
-        ["Отменить"]
-    ]
-    reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
-    await update.message.reply_text("Выберите время или введите своё:", reply_markup=reply_markup)
-    return TIME
+
+    # Вместо показа времени — вызываем календарь
+    await inline_calendar_view(update, context)
+    return ConversationHandler.END
 
 # Время + отправка + сохранение
+
 async def get_time(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     context.user_data["state"] = TIME
     chosen_time = update.message.text.strip()
@@ -50,8 +48,7 @@ async def get_time(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     name = context.user_data['name']
     phone = context.user_data['phone']
     user_id = update.message.from_user.id
-    username = update.message.from_user.username
-    username_display = f"@{username}" if username else "🚫 нет username"
+    username = f"@{update.message.from_user.username}" if update.message.from_user.username else "неизвестно"
 
     # Проверка, занято ли время другим пользователем
     all_records = context.application.bot_data.get("records", {})
@@ -69,32 +66,46 @@ async def get_time(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     context.application.bot_data["records"].setdefault(user_id, []).append({
         "name": name,
         "phone": phone,
-        "time": chosen_time
+        "time": chosen_time,
+        "username": username
     })
+
      # 🧠 Сохраняем в JSON
     save_records(context.application.bot_data["records"])
+
     # Ответ пользователю
     keyboard = [
         [KeyboardButton("Мои Записи")],
         [KeyboardButton("На главную")]
     ]
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+
+    admin_us = "@qwerty4666" 
+    admin_tel = "+375293541777"
     await update.message.reply_text(
+
         f"Спасибо, {name}!\n"
-        f"Ваша заявка:\n📞 {phone}\n🕒 {chosen_time}",
+        f"Ваша заявка:\n📞 {phone}"
+        f"\n 🕒 {chosen_time}\n\n"
+        f"Если у вас есть вопросы — свяжитесь с администратором по телеграмм: {admin_us} \n" 
+        f"Или по телефону: {admin_tel}",
         reply_markup=reply_markup
+
     )
+
 
     # Отправка админу
     admin_id = ADMIN_ID
     await context.bot.send_message(
         chat_id=admin_id,
         text=(
+
             f"📥 Новая заявка:\n"
             f"👤 Имя: {name}\n"
             f"📞 Телефон: {phone}\n"
             f"🕒 Время: {chosen_time}\n"
-            f"🆔 Пользователь: {username_display}"
+            f"🆔 Пользователь: {username}"
+
         )
     )
 
