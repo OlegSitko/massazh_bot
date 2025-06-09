@@ -13,6 +13,7 @@ from telegram.ext import (
     ConversationHandler,
     filters
 )
+from kalendar import admin_calendar_view  # Импортируем функцию для отображения календаря
 from config import ADMIN_ID
 from config import BOT_TOKEN
 

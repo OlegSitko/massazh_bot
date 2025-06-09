@@ -17,36 +17,47 @@ from telegram.ext import (
     CallbackQueryHandler
 )
 from config import ADMIN_ID
-from config import BOT_TOKEN
-import json
-import os
+from JSON import load_records, save_records
+
+
 
 # Мои записи
-
 async def my_records(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
 
-    # Загрузка из файла при необходимости
+    # Проверяем, есть ли записи в bot_data, если нет - загружаем их
     if "records" not in context.application.bot_data:
         context.application.bot_data["records"] = load_records()
 
-    records = context.application.bot_data["records"].get(str(user_id)) or context.application.bot_data["records"].get(user_id)
+    # Получаем все записи пользователя по user_id (ищем ключи, содержащие user_id)
+    all_records = context.application.bot_data["records"]
+    
+    # Преобразуем ключи в строки и проверяем, что они содержат user_id
+    user_records = [
+        record
+        for key, record_list in all_records.items()
+        if str(user_id) in str(key)  # Приводим ключ к строке и проверяем, содержит ли он user_id
+        for record in record_list
+    ]
 
-    if not records:
+    if not user_records:  # Если записей нет
         await update.message.reply_text("У вас пока нет записей.")
         return
 
+    # Формируем сообщение с записями
     message = "📋 Ваши записи:"
-    for i, r in enumerate(records, 1):
+    for i, r in enumerate(user_records, 1):
         message += (
             f"\n{i}. {r['name']}"
             f"\n   📞 {r['phone']}"
             f"\n   🕒 {r['time']}\n"
         )
+
+    # Отправляем сообщение пользователю
     await update.message.reply_text(message)
 
 #################################################################################
-# Все Записи
+
 async def all_records(update: Update, context: ContextTypes.DEFAULT_TYPE):
     admin_id = ADMIN_ID
     user_id = update.message.from_user.id
@@ -55,28 +66,34 @@ async def all_records(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⛔ Эта команда доступна только администратору.")
         return
 
-    # Данные с JSON
+    # Получаем все данные из bot_data["records"]
     all_data = context.application.bot_data.get("records", {})
+
+    # Для диагностики: выведем данные, которые загружены в bot_data
+    print("Загруженные записи:", all_data)  # Это поможет увидеть, что хранится в bot_data
+
     if not all_data:
         await update.message.reply_text("Записей пока нет.")
         return
 
     msg = "📋 Все записи клиентов:\n"
-    counter = 1  # <-- номер записи
+    counter = 1
 
-    for uid, records in all_data.items():
-        for r in records:
-            username = f"@{r['username']}" if r.get("username") else "неизвестно"
+    # Перебираем все записи в all_data
+    for user_id, records in all_data.items():
+        for record in records:
             msg += (
                 f"№{counter}:\n"
-                f"👤 {r['name']}\n"
-                f"📞 {r['phone']}\n"
-                f"🕒 {r['time']}\n"
-                f"🆔 Пользователь: {username}\n\n"
+                f"👤 Имя: {record['name']}\n"
+                f"📞 Телефон: {record['phone']}\n"
+                f"🕒 Время: {record['time']}\n"
+                f"🆔 Пользователь: {record['username']}\n\n"
             )
             counter += 1
 
+    # Отправляем сообщение с записями
     await update.message.reply_text(msg)
+
 
 # Запуск удаления
 async def admin_delete_record(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -133,35 +150,10 @@ async def confirm_admin_delete(update: Update, context: ContextTypes.DEFAULT_TYP
     if not context.application.bot_data["records"][uid]:
         del context.application.bot_data["records"][uid]
 
-    from records import save_records
     save_records(context.application.bot_data["records"])
 
     await update.message.reply_text(f"✅ Запись удалена: {rec['name']} | {rec['phone']} | {rec['time']}")
     return ConversationHandler.END
-
-
-RECORDS_FILE = "records.json"
-
-# Загрузка данных из файла
-def load_records():
-    if os.path.exists(RECORDS_FILE):
-        try:
-            with open(RECORDS_FILE, "r", encoding="utf-8") as f:
-                content = f.read().strip()
-                if not content:
-                    return {}  # файл пустой
-                return json.loads(content)
-        except json.JSONDecodeError:
-            print("[ERROR] Невозможно загрузить JSON. Файл повреждён.")
-            return {}
-    return {}
-
-
-# Сохранение данных в файл
-def save_records(data):
-    with open(RECORDS_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
-
 
 # Отмена записи пользователем
 async def cancel_record(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -215,3 +207,4 @@ async def confirm_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(f"✅ Запись на {removed['time']} удалена.")
     return ConversationHandler.END
+
