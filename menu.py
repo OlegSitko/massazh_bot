@@ -43,7 +43,7 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if user_id == ADMIN_ID:
         keyboard = [
             [KeyboardButton("Все Записи")],
-            [KeyboardButton("Удалить запись")],  # добавляем
+            # [KeyboardButton("Удалить запись")],  # добавляем
             [KeyboardButton("📅 Календарь записей")]
         ]
         reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)

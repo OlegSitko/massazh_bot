@@ -16,6 +16,8 @@ from telegram.ext import (
     filters,
     CallbackQueryHandler
 )
+from datetime import datetime, date, timedelta  # Добавлен импорт datetime
+from JSON import save_records
 import calendar
 from records import my_records, all_records, cancel_record, save_records, load_records
 from datetime import date, timedelta
@@ -34,10 +36,10 @@ async def handle_admin_day_click(update: Update, context: ContextTypes.DEFAULT_T
         return
 
     selected_date = data.replace("admin_day_", "")
+
     all_records = context.application.bot_data.get("records", {})
     found = []
 
-    # Ищем записи для выбранной даты
     for rec_list in all_records.values():
         for r in rec_list:
             if r["time"].startswith(selected_date):
@@ -48,6 +50,8 @@ async def handle_admin_day_click(update: Update, context: ContextTypes.DEFAULT_T
         return
 
     msg = f"📅 Записи на {selected_date}:\n"
+    keyboard = []
+
     for i, r in enumerate(found, 1):
         msg += (
             f"\n{i}. 👤 {r['name']}\n"
@@ -55,40 +59,72 @@ async def handle_admin_day_click(update: Update, context: ContextTypes.DEFAULT_T
             f"🕒 {r['time']}\n"
             f"🆔 {r['username']}\n"
         )
+        keyboard.append(
+            [InlineKeyboardButton(f"Удалить запись {i}", callback_data=f"delete_record_{i}")]
+        )
 
-    await query.edit_message_text(msg)
+    keyboard.append([InlineKeyboardButton("Назад", callback_data="back_to_admin_calendar")])
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await query.edit_message_text(msg, reply_markup=reply_markup)
 
+async def handle_delete_record(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    data = query.data
+    if not data.startswith("delete_record_"):
+        return
+
+    record_index = int(data.replace("delete_record_", "")) - 1
+    all_records = context.application.bot_data.get("records", {})
+    found = []
+
+    for rec_list in all_records.values():
+        for r in rec_list:
+            found.append(r)
+
+    if record_index < 0 or record_index >= len(found):
+        await query.edit_message_text("⚠️ Ошибка: Запись не найдена.")
+        return
+
+    record_to_delete = found[record_index]
+    
+    for user_id, rec_list in all_records.items():
+        if record_to_delete in rec_list:
+            rec_list.remove(record_to_delete)
+            if not rec_list:
+                del all_records[user_id]
+            break
+
+    context.application.bot_data["records"] = all_records
+    save_records(all_records)
+
+    await query.edit_message_text(f"✅ Запись на {record_to_delete['time']} удалена.")
+    await admin_calendar_view(update, context)
 
 async def admin_calendar_view(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Логируем тип update для диагностики
-    print(f"Received update: {update}")
-
-    # Проверяем, есть ли callback_query или message
     if update.callback_query:
-        user_id = update.callback_query.from_user.id  # Получаем user_id из callback_query
-        if user_id != ADMIN_ID:  # Проверяем, что это админ
+        user_id = update.callback_query.from_user.id
+        if user_id != ADMIN_ID:
             await update.callback_query.message.reply_text("⛔️ Только администратор может просматривать все записи.")
             return
     elif update.message:
-        user_id = update.message.from_user.id  # Получаем user_id из обычного сообщения
-        if user_id != ADMIN_ID:  # Проверяем, что это админ
+        user_id = update.message.from_user.id
+        if user_id != ADMIN_ID:
             await update.message.reply_text("⛔️ Только администратор может просматривать все записи.")
             return
     else:
-        return  # Если update не содержит ни message, ни callback_query
+        return
 
-    # Получаем текущий месяц и год из user_data
     current_month = context.user_data.get("current_month", date.today().month)
     current_year = context.user_data.get("current_year", date.today().year)
 
-    # Строим календарь для текущего месяца
     cal = calendar.Calendar(firstweekday=0)
     month_days = cal.itermonthdays(current_year, current_month)
     
     all_records = context.application.bot_data.get("records", {})
     booked_dates = set()
 
-    # Собираем занятые даты
     for rec_list in all_records.values():
         for r in rec_list:
             match = re.match(r"(\d{2})\.(\d{2})\.(\d{4})", r["time"])
@@ -98,14 +134,13 @@ async def admin_calendar_view(update: Update, context: ContextTypes.DEFAULT_TYPE
     keyboard = []
     week = []
 
-    # Строим календарь с пометками
     for day in month_days:
         if day == 0:
             week.append(InlineKeyboardButton(" ", callback_data="ignore"))
         else:
             current_date = date(current_year, current_month, day).strftime("%d.%m.%Y")
             if current_date in booked_dates:
-                text = f"{day}🟢"  # Зеленая метка, если дата занята
+                text = f"{day}🟢"
                 callback = f"admin_day_{current_date}"
             else:
                 text = f"{day}"
@@ -120,79 +155,60 @@ async def admin_calendar_view(update: Update, context: ContextTypes.DEFAULT_TYPE
     if week:
         keyboard.append(week)
 
-    # Кнопки для переключения на следующий и предыдущий месяц
+    # Кнопки навигации по месяцам
     keyboard.append([
-        InlineKeyboardButton("⬅️ Предыдущий месяц", callback_data="prev_month"),
-        InlineKeyboardButton("Следующий месяц ➡️", callback_data="next_month")
+        InlineKeyboardButton("<< Текущий месяц", callback_data="current_month"),
+        InlineKeyboardButton("Следующий месяц >>", callback_data="next_month")
     ])
 
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    # Сохраняем текущий месяц и год в user_data для дальнейшего использования
     context.user_data["current_month"] = current_month
     context.user_data["current_year"] = current_year
 
-    # Ответ пользователю
+    text = f"📅 Календарь на {calendar.month_name[current_month]} {current_year}:\n🟢 — есть запись (нажмите на дату)"
+    
     if update.callback_query:
-        await update.callback_query.message.reply_text(
-            f"📅 Календарь на {calendar.month_name[current_month]} {current_year}:\n🟢 — есть запись (нажмите на дату)",
-            reply_markup=reply_markup
-        )
-    elif update.message:
-        await update.message.reply_text(
-            f"📅 Календарь на {calendar.month_name[current_month]} {current_year}:\n🟢 — есть запись (нажмите на дату)",
-            reply_markup=reply_markup
-        )
-
-
+        await update.callback_query.message.edit_text(text, reply_markup=reply_markup)
+    else:
+        await update.message.reply_text(text, reply_markup=reply_markup)
 
 async def handle_month_navigation(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
     data = query.data
-
-    # Получаем текущий месяц и год из user_data
     current_month = context.user_data.get("current_month", date.today().month)
     current_year = context.user_data.get("current_year", date.today().year)
 
-    # Определяем диапазон возможных месяцев (текущий, предыдущий, следующий)
-    # Для этого нужно ограничить переход на следующие и предыдущие месяцы.
-    if data == "prev_month":
-        # Переход к предыдущему месяцу
-        if current_month == 1:  # Январь - нельзя перейти назад
-            await query.edit_message_text("⛔️ Это первый месяц года, нельзя перейти назад.")
-            return
-        # Уменьшаем месяц
-        current_month -= 1
-
+    if data == "current_month":
+        current_month = date.today().month
+        current_year = date.today().year
     elif data == "next_month":
-        # Переход к следующему месяцу
-        if current_month == 12:  # Декабрь - нельзя перейти вперед
-            await query.edit_message_text("⛔️ Это последний месяц года, нельзя перейти вперед.")
+        next_date = date(current_year, current_month, 1) + timedelta(days=31)
+        if next_date > date.today() + timedelta(days=90):
+            await query.answer("Запись доступна только на 3 месяца вперед", show_alert=True)
             return
-        # Увеличиваем месяц
-        current_month += 1
+        if current_month == 12:
+            current_month = 1
+            current_year += 1
+        else:
+            current_month += 1
 
-    # Проверка, чтобы месяц не выходил за пределы текущего, следующего и предыдущего месяцев
-    if current_month < (date.today().month - 1) or current_month > (date.today().month + 1):
-        await query.edit_message_text("⛔️ Выход за пределы доступных месяцев.")
-        return
-
-    # Сохраняем новый месяц и год в user_data для дальнейшего использования
     context.user_data["current_month"] = current_month
     context.user_data["current_year"] = current_year
 
-    # Перезапускаем календарь с новыми параметрами
-    await admin_calendar_view(update, context)
-
-
+    if "Календарь записей" in query.message.text:  # Админский календарь
+        await admin_calendar_view(update, context)
+    else:  # Пользовательский календарь
+        await inline_calendar_view(update, context)
 
 async def inline_calendar_view(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    today = date.today()
-    year, month = today.year, today.month
+    current_month = context.user_data.get("current_month", date.today().month)
+    current_year = context.user_data.get("current_year", date.today().year)
+    
     cal = calendar.Calendar(firstweekday=0)
-    month_days = cal.itermonthdays(year, month)
+    month_days = cal.itermonthdays(current_year, current_month)
 
     keyboard = []
     week = []
@@ -201,7 +217,14 @@ async def inline_calendar_view(update: Update, context: ContextTypes.DEFAULT_TYP
         if day == 0:
             week.append(InlineKeyboardButton(" ", callback_data="ignore"))
         else:
-            week.append(InlineKeyboardButton(str(day), callback_data=f"day_{day}"))
+            current_date = date(current_year, current_month, day)
+            if current_date < date.today():  # Прошедшие даты
+                week.append(InlineKeyboardButton("✖️", callback_data="ignore"))
+            else:
+                week.append(InlineKeyboardButton(
+                    str(day), 
+                    callback_data=f"day_{current_date.strftime('%d.%m.%Y')}"
+                ))
 
         if len(week) == 7:
             keyboard.append(week)
@@ -210,13 +233,22 @@ async def inline_calendar_view(update: Update, context: ContextTypes.DEFAULT_TYP
     if week:
         keyboard.append(week)
 
+    # Кнопки навигации по месяцам
+    keyboard.append([
+        InlineKeyboardButton("<< Текущий месяц", callback_data="current_month"),
+        InlineKeyboardButton("Следующий месяц >>", callback_data="next_month")
+    ])
+
     reply_markup = InlineKeyboardMarkup(keyboard)
+    context.user_data["current_month"] = current_month
+    context.user_data["current_year"] = current_year
 
-    await update.message.reply_text(
-        f"📅 Выберите дату ({calendar.month_name[month]} {year}):",
-        reply_markup=reply_markup
-    )
-
+    text = f"📅 Выберите дату ({calendar.month_name[current_month]} {current_year}):"
+    
+    if update.callback_query:
+        await update.callback_query.message.edit_text(text, reply_markup=reply_markup)
+    else:
+        await update.message.reply_text(text, reply_markup=reply_markup)
 
 async def handle_day_selection(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -225,33 +257,26 @@ async def handle_day_selection(update: Update, context: ContextTypes.DEFAULT_TYP
     if not data.startswith("day_"):
         return
 
-    selected_day = int(data.split("_")[1])
-    today = date.today()
-    selected_date = date(today.year, today.month, selected_day)
-    formatted = selected_date.strftime("%d.%m.%Y")
+    selected_date_str = data.replace("day_", "")
+    selected_date = datetime.strptime(selected_date_str, "%d.%m.%Y").date()
+    
+    if selected_date < date.today():
+        await query.answer("Нельзя выбрать прошедшую дату", show_alert=True)
+        return
 
-    # Сохраняем выбранную дату в user_data
-    context.user_data["selected_date"] = formatted
+    context.user_data["selected_date"] = selected_date_str
 
-    # Кнопки с временем
     times = ["10:00", "12:00", "14:00", "16:00", "18:00"]
-    keyboard = [[InlineKeyboardButton(t, callback_data=f"time_{t}")] for t in times]
+    keyboard = [
+        [InlineKeyboardButton(t, callback_data=f"time_{t}")] for t in times
+    ]
     keyboard.append([InlineKeyboardButton("◀️ Назад", callback_data="back_to_dates")])
 
-    reply_markup = InlineKeyboardMarkup(keyboard)
-
     await query.edit_message_text(
-        f"Вы выбрали дату: *{formatted}*\nВыберите время:",
+        f"Вы выбрали дату: *{selected_date_str}*\nВыберите время:",
         parse_mode="Markdown",
-        reply_markup=reply_markup
+        reply_markup=InlineKeyboardMarkup(keyboard)
     )
-
-async def handle_back_to_dates(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    await query.edit_message_text("🔙 Возврат к выбору даты...")
-    await inline_calendar_view(update, context)
-
 
 async def handle_time_selection(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -276,25 +301,22 @@ async def handle_time_selection(update: Update, context: ContextTypes.DEFAULT_TY
     name = context.user_data.get("name", user.first_name)
     phone = context.user_data.get("phone", "не указан")
 
-    # Проверка занятости
     all_records = context.application.bot_data.get("records", {})
     for uid, rec_list in all_records.items():
         for record in rec_list:
             if record["time"] == full_slot:
-                # Повторно показать выбор времени
                 times = ["10:00", "12:00", "14:00", "16:00", "18:00"]
-                keyboard = [[InlineKeyboardButton(t, callback_data=f"time_{t}")] for t in times]
+                keyboard = [
+                    [InlineKeyboardButton(t, callback_data=f"time_{t}")] for t in times
+                ]
                 keyboard.append([InlineKeyboardButton("◀️ Назад", callback_data="back_to_dates")])
-                reply_markup = InlineKeyboardMarkup(keyboard)
-
+                
                 await query.edit_message_text(
                     f"❌ Время {full_slot} уже занято.\n\nВыберите другое время:",
-                    reply_markup=reply_markup
+                    reply_markup=InlineKeyboardMarkup(keyboard)
                 )
                 return
 
-
-    # Сохраняем
     context.application.bot_data.setdefault("records", {})
     context.application.bot_data["records"].setdefault(user_id, []).append({
         "name": name,
@@ -304,7 +326,6 @@ async def handle_time_selection(update: Update, context: ContextTypes.DEFAULT_TY
     })
     save_records(context.application.bot_data["records"])
 
-    # Сообщение пользователю
     keyboard = [
         [KeyboardButton("Мои Записи")],
         [KeyboardButton("На главную")]
@@ -313,24 +334,23 @@ async def handle_time_selection(update: Update, context: ContextTypes.DEFAULT_TY
 
     await context.bot.send_message(
         chat_id=user_id,
-        text=(
-            f"Спасибо, {name}!\n"
-            f"Ваша заявка:\n📞 {phone}\n🕒 {full_slot}\n\n"
-            f"Если есть вопросы — свяжитесь с администратором:\n"
-            f"Telegram: @qwerty4666\nТелефон: +375293541777"
-        ),
+        text=(f"Спасибо, {name}!\n"
+              f"Ваша заявка:\n📞 {phone}\n🕒 {full_slot}\n\n"
+              f"Если есть вопросы — свяжитесь с администратором:\n"
+              f"Telegram: @qwerty4666\nТелефон: +375293541777"),
         reply_markup=reply_markup
     )
 
-    # Сообщение админу
-    from config import ADMIN_ID
     await context.bot.send_message(
         chat_id=ADMIN_ID,
-        text=(
-            f"📥 Новая заявка:\n"
-            f"👤 Имя: {name}\n"
-            f"📞 Телефон: {phone}\n"
-            f"🕒 Время: {full_slot}\n"
-            f"🆔 Пользователь: {username}"
-        )
+        text=(f"📥 Новая заявка:\n"
+              f"👤 Имя: {name}\n"
+              f"📞 Телефон: {phone}\n"
+              f"🕒 Время: {full_slot}\n"
+              f"🆔 Пользователь: {username}")
     )
+
+async def handle_back_to_dates(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    await inline_calendar_view(update, context)

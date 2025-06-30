@@ -15,7 +15,8 @@ from kalendar import (
     handle_admin_day_click,
     inline_calendar_view,
     admin_calendar_view,
-    handle_month_navigation
+    handle_month_navigation,
+    handle_delete_record
 )
 from records import (
     my_records, all_records,
@@ -25,6 +26,7 @@ from records import (
 )
 from JSON import load_all_records
 NAME, PHONE, TIME = range(3)
+CANCEL_RECORD = 100
 
 
 
@@ -57,8 +59,23 @@ def main():
             MessageHandler(filters.TEXT & filters.Regex("^На главную$"), back_to_menu)
         ]
     )
-
+    cancel_conv_handler = ConversationHandler(
+        entry_points=[MessageHandler(filters.TEXT & filters.Regex("^Отменить запись$"), cancel_record)],
+        states={
+            CANCEL_RECORD: [MessageHandler(filters.TEXT & ~filters.COMMAND, confirm_cancel)],
+        },
+        fallbacks=[
+            CommandHandler("cancel", cancel),
+            MessageHandler(filters.TEXT & filters.Regex("^На главную$"), back_to_menu),
+        ],
+    )
+    app.add_handler(cancel_conv_handler)
     # Команды администратора
+    app.add_handler(CallbackQueryHandler(handle_month_navigation, pattern="^(current_month|next_month)$"))
+    app.add_handler(CallbackQueryHandler(handle_day_selection, pattern="^day_"))
+    app.add_handler(CallbackQueryHandler(handle_time_selection, pattern="^time_"))
+    app.add_handler(CallbackQueryHandler(handle_back_to_dates, pattern="^back_to_dates$"))
+
     app.add_handler(CommandHandler("start", menu))
     app.add_handler(CommandHandler("menu", menu))
     app.add_handler(conv_handler)
@@ -69,11 +86,14 @@ def main():
     app.add_handler(CallbackQueryHandler(handle_day_selection, pattern="^day_"))
     app.add_handler(MessageHandler(filters.TEXT & filters.Regex("^📅 Календарь записей$"), admin_calendar_view))
     app.add_handler(CallbackQueryHandler(handle_admin_day_click, pattern="^admin_day_"))
+    app.add_handler(CallbackQueryHandler(handle_admin_day_click, pattern="^admin_day_"))
+    app.add_handler(CallbackQueryHandler(handle_delete_record, pattern="^delete_record_"))
+    app.add_handler(CallbackQueryHandler(handle_back_to_dates, pattern="^back_to_dates$"))
+    app.add_handler(MessageHandler(filters.TEXT & filters.Regex("^Отменить запись$"), cancel_record))
     app.add_handler(MessageHandler(filters.TEXT, inline_calendar_view))  # Добавить обработчик календаря
     app.add_handler(CallbackQueryHandler(handle_time_selection, pattern="^time_"))
-    app.add_handler(CallbackQueryHandler(handle_month_navigation, pattern="^(prev_month|next_month)$"))
+    app.add_handler(CallbackQueryHandler(handle_month_navigation, pattern="^(current_month|next_month)$"))
     app.add_handler(CallbackQueryHandler(admin_calendar_view, pattern="^admin_day_"))
-
     app.run_polling()
 
 if __name__ == '__main__':
