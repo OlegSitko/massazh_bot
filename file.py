@@ -27,7 +27,10 @@ from records import (
 from JSON import load_all_records
 NAME, PHONE, TIME = range(3)
 CANCEL_RECORD = 100
+from background import keep_alive
 
+
+keep_alive()
 
 
 def main():
